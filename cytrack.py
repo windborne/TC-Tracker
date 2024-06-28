@@ -20,9 +20,9 @@ mpisize = comm.Get_size()
 
 start_time = time.time()
 
-def get_cytrack_main(pathfile=""):
+def get_cytrack_main(pathfile="",begin_year="",begin_month="",begin_day="",begin_hour="",end_year="",end_month="",end_day="",end_hour=""):
 	if rank==0:
-		disclaimer()
+		#disclaimer()
 		print("\n")
 		print("Using parameters from: " + pathfile)
 		print("============================================================================================================\n")
@@ -51,14 +51,6 @@ def get_cytrack_main(pathfile=""):
 	path_data_source_upper = check_paths(content, "path_data_source_upper")
 	search_limits = check_paths(content, "search_limits")
 	search_region = check_paths(content, "search_region")
-	begin_year = check_paths(content, "begin_year")
-	begin_month = check_paths(content, "begin_month")
-	begin_day = check_paths(content, "begin_day")
-	begin_hour = check_paths(content, "begin_hour")
-	end_year = check_paths(content, "end_year")
-	end_month = check_paths(content, "end_month")
-	end_day = check_paths(content, "end_day")
-	end_hour = check_paths(content, "end_hour")
 	calendar =  check_paths(content, "calendar")
 	dt_h = check_paths(content, "dt_h")
 	path_out = check_paths(content, "path_out")
@@ -161,7 +153,7 @@ def get_cytrack_main(pathfile=""):
 	
 	
 	if rank==0:
-		if not os.path.exists(pathoutput):os.makedirs(pathoutput)
+	#	if not os.path.exists(pathoutput):os.makedirs(pathoutput)
 		if not os.path.exists(tmpdir):os.makedirs(tmpdir)
 	
 	
@@ -181,12 +173,11 @@ def get_cytrack_main(pathfile=""):
 		prev_days=prev_days,
 		calendar=calendar
 		)
-    #sys.exit()
 	i_bg=get_i_bg(prev_days)
-	
+    #sys.exit()
+    #i_bg=get_i_bg(prev_days)
 	dates=dates[i_bg:]
 	hours=hours[i_bg:]
-
 	checking_optimum_nproc(rank=rank, n_proc=mpisize, length_files=len(dates[i_bg:]))
 	if rank==0 and verbose:
 		print("\nTracking " + cyclone_type.upper()+"s over " + search_region +" region using the " + source  +" meteorological fields")
@@ -289,8 +280,6 @@ def get_cytrack_main(pathfile=""):
 			print("    ---> | Upper   Files : PASSED")
 			print("----------------------------------------------------------------------------------------")
 
-
-	
 	dates=dates[i_bg:]
 	hours=hours[i_bg:]
 	input_files=input_files[i_bg:]
@@ -369,12 +358,12 @@ def get_cytrack_main(pathfile=""):
 			path_data_terr_source=path_data_terr_source)
 			
 		comm.barrier()
-
+	#sys.exit()
 	if rank==0:
 		if verbose:
 
 			print("\n\nLinking " + cyclone_type.upper() +" critical centers to contruct the full trajectory")
-		sys_id=paring_centers(cyclone_type=cyclone_type,
+		sys_id,tracks=paring_centers(cyclone_type=cyclone_type,
 				dates=dates,
 				hours=hours,
 				dist_threshold=dist_threshold,
@@ -420,5 +409,5 @@ def get_cytrack_main(pathfile=""):
 	if rank==0:
 		if verbose:
 			print("\nRun time: %.2f seconds." % np.round(elapsed_time, 2))
-		ending_credits()
-
+		#ending_credits()
+	return sys_id,tracks

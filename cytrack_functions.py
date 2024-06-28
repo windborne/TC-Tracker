@@ -21,6 +21,8 @@ import functools
 from scipy.interpolate import interp1d
 from scipy.ndimage import maximum_filter, minimum_filter
 import json
+import pathlib
+import boto3
 print = functools.partial(print, flush=True)
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
@@ -1110,16 +1112,18 @@ def get_wm_files(dates=[""],hours=[""],wm_file_prefix="",wm_date_file_name="yyyy
 			print_error_message("Unrecognized WM file wm_date_file_name attribute in CyTRACK input paramters file\nera_date_file_name must be yyyymmdd_hh or yyyymmddhh\nRun << python run_CyTRACK.py - cth t >> for help")
 		if mslp_anom_files:
 			if int(year+month+day+hour) <= int(begin_year+begin_month+begin_day+begin_hour):
-				fname = '{0}/{1}+1.MA1l.npy'.format(path_data_source_upper,year+month+day+hour)
+				fname = '{1}+1.MA1l.npy'.format(path_data_source_upper,year+month+day+hour)
 			else:
 				forecast_hour = int((datetime(int(year),int(month),int(day),int(hour))-datetime(int(begin_year),int(begin_month),int(begin_day),int(begin_hour))).total_seconds()/60./60.)
-				fname = '{0}/{1}+{2}.MA1l.npy'.format(path_data_source_upper,begin_year+begin_month+begin_day+begin_hour,forecast_hour)
+				fname = '{1}+{2}.MA1l.npy'.format(path_data_source_upper,begin_year+begin_month+begin_day+begin_hour,forecast_hour)
 		else:
 			if int(year+month+day+hour) < int(begin_year+begin_month+begin_day+begin_hour):
-				fname = '{0}/{1}+1.MA1l.npy'.format(path_data_source_upper,year+month+day+hour)
+				fname = '{1}+1.MA1l.npy'.format(path_data_source_upper,year+month+day+hour)
 			else:
 				forecast_hour = int((datetime(int(year),int(month),int(day),int(hour)) - datetime(int(begin_year),int(begin_month),int(begin_day),int(begin_hour))).total_seconds()/60./60.)
-				fname = '{0}/{1}+{2}.MA1l.npy'.format(path_data_source_upper,begin_year+begin_month+begin_day+begin_hour,forecast_hour)
+				if forecast_hour == 0:
+					forecast_hour = 1
+				fname = '{1}+{2}.MA1l.npy'.format(path_data_source_upper,begin_year+begin_month+begin_day+begin_hour,forecast_hour)        
 		wmfiles=np.append(wmfiles,fname)
 	return wmfiles
 
@@ -1373,15 +1377,14 @@ def get_wm_2dvar_mslp(idir="./",
 		path_data_source_upper=""):
 	
     # Load metadata
-	metadata = json.load(open('{0}/meta.MA1l.json'.format(path_data_source_upper)))
+	#metadata = json.load(open('{0}/meta.MA1l.json'.format(path_data_source_upper)))
+	metadata = read_metadata()
 	eralat = np.array(metadata['lats'])
 	eralon = np.array(metadata['lons']) % 360
-	wm_varlist = np.array(metadata['full_varlist'])
-	wm_varlist = np.array([d[4:] for d in wm_varlist])
 	### Load in npy file
-	erafile = '{0}/{1}/151_msl.npy'.format(path_data_source,erafile.split('/')[-1][:-4])
-	wm_data = np.load(erafile)
-	#for var in svariables:
+	init_date = erafile.split('+')[0]
+	fore_hour = erafile.split('+')[1].split('.')[0]
+	wm_data = read_by_var(init_date, fore_hour, '151_msl') 
 	vars()[svariables[0]]=wm_data[:,:]
 	if search_region.upper() in ("NA","SA","AL","MS"):
 		for i in range(0,len(svariables)):
@@ -1407,7 +1410,6 @@ def get_wm_2dvar_mslp(idir="./",
 	varlist=np.empty((len(svariables)+2,nera_lat.shape[0],nera_lat.shape[1]))
 	varlist[0,:]=nera_lat
 	varlist[1,:]=nera_lon
-	#ncera.close()
 	for i in range(0,len(svariables)):
 		varlist[i+2,:]=vars()["n"+svariables[i]]
 	return varlist
@@ -1421,24 +1423,25 @@ def get_wm_2dvar_anom(idir="./",
 		path_data_source_upper=""):
 	
     # Load metadata
-	metadata = json.load(open('{0}/meta.MA1l.json'.format(path_data_source_upper)))
+	metadata = read_metadata()
 	eralat = np.array(metadata['lats'])
 	eralon = np.array(metadata['lons']) % 360
-	wm_varlist = np.array(metadata['full_varlist'])
-	wm_varlist = np.array([d[4:] for d in wm_varlist])
 	### Load in npy file
 	### Sanity checks for dates
-	#print(erafile.split('/')[-1][:-4])
 	date = erafile.split('/')[-1][:-4].split('+')[0]
 	hour = erafile.split('/')[-1][:-4].split('+')[1].split('.')[0]
 	if hour == '1':
 	  hour = '0'
 	##
 	vaild_date = datetime(int(date[:4]),int(date[4:6]),int(date[6:8]),int(date[8:])) + timedelta(hours=int(hour))
-	erafile = '{0}/{1}/151_msl.npy'.format(path_data_source,erafile.split('/')[-1][:-4])
+	#print(erafile)
+	init_date = erafile.split('+')[0]
+	fore_hour = erafile.split('+')[1].split('.')[0]
+	#print(init_date,fore_hour)
+	wm_data = read_by_var(init_date, fore_hour, '151_msl')
+	#sys.exit()
 	## Sanity checks for dates
 	#print('{0} => {1}'.format(erafile,vaild_date))
-	wm_data = np.load(erafile)
 	vars()[svariables[0]]=wm_data[:,:]
 	if search_region.upper() in ("NA","SA","AL","MS"):
 		for i in range(0,len(svariables)):
@@ -1464,7 +1467,6 @@ def get_wm_2dvar_anom(idir="./",
 	varlist=np.empty((len(svariables)+2,nera_lat.shape[0],nera_lat.shape[1]))
 	varlist[0,:]=nera_lat
 	varlist[1,:]=nera_lon
-	#ncera.close()
 	for i in range(0,len(svariables)):
 		varlist[i+2,:]=vars()["n"+svariables[i]]
 	return varlist
@@ -1478,16 +1480,21 @@ def get_wm_2dvar_wind(idir="./",
 		path_data_source_upper=""):
 
     # Load metadata
-	metadata = json.load(open('{0}/meta.MA1l.json'.format(path_data_source_upper)))
+	#metadata = json.load(open('{0}/meta.MA1l.json'.format(path_data_source_upper)))
+	metadata = read_metadata()
 	eralat = np.array(metadata['lats'])
 	eralon = np.array(metadata['lons']) % 360
 	wm_varlist = np.array(metadata['full_varlist'])
 	wm_varlist = np.array([d[4:] for d in wm_varlist])
 	### Load in npy file
-	erafileu = '{0}/{1}/165_10u.npy'.format(path_data_source, erafile.split('/')[-1][:-4])
-	erafilev = '{0}/{1}/166_10v.npy'.format(path_data_source,erafile.split('/')[-1][:-4])
-	wm_data_u = np.load(erafileu)
-	wm_data_v = np.load(erafilev)
+	init_date = erafile.split('+')[0]
+	fore_hour = erafile.split('+')[1].split('.')[0]
+	wm_data_u = read_by_var(init_date, fore_hour, '165_10u')
+	wm_data_v = read_by_var(init_date, fore_hour, '166_10v')
+	#erafileu = '{0}/{1}/165_10u.npy'.format(path_data_source, erafile.split('/')[-1][:-4])
+	#erafilev = '{0}/{1}/166_10v.npy'.format(path_data_source,erafile.split('/')[-1][:-4])
+	#wm_data_u = np.load(erafileu)
+	#wm_data_v = np.load(erafilev)
 	#for var in svariables:
 	vars()[svariables[0]]=wm_data_u[:,:]
 	vars()[svariables[1]]=wm_data_v[:,:]
@@ -1687,19 +1694,17 @@ def get_wm_3dvar(idir="./",
 	variablenot=False
 
 	# Load metadata
-	metadata = json.load(open('/Users/criedel/mnt/wb-dlnwp/WeatherMesh/meta.MA1l.json'))
-	eralat = np.array(metadata['lats'])
+	#metadata = json.load(open('/Users/criedel/mnt/wb-dlnwp/WeatherMesh/meta.MA1l.json'))
+	metadata = read_metadata()
+	eralat_ = np.array(metadata['lats'])
 	eralon = np.array(metadata['lons']) % 360
-	wm_varlist = np.array(metadata['full_varlist'])
-	wm_varlist = np.array([d[4:] for d in wm_varlist])
-	z_ind = np.where('z_' in wm_varlist)[0]
-	wm_levels = np.array(metadata['levels'])
-	wm_data = np.load(erafile)
-
-	eralat_=eralat
-	eralon=eralon
-	levels=np.array(wm_levels)
-	evar=wm_data[:,:,:wm_levels.shape[0]]/9.80665
+	#wm_varlist = np.array(metadata['full_varlist'])
+	#wm_varlist = np.array([d[4:] for d in wm_varlist])
+	levels = np.array(metadata['levels'])
+	init_date = erafile.split('+')[0]
+	fore_hour = erafile.split('+')[1].split('.')[0]
+	wm_data = read_full_output(init_date, fore_hour)
+	evar=wm_data[:,:,:levels.shape[0]]/9.80665
 	evar = np.rollaxis(evar,2,0)
 	
 	lonn,latt=np.meshgrid(eralon,eralat_)
@@ -1942,7 +1947,45 @@ def get_wind_speed(latsc=[None],lonsc=[None],radius=[None],wfile="",idir="./",va
 	else:
 		return ffcentres
 
+#########################################
+#### Functions to read in WM data
+#### written by Kai
+s3 = None
+def get_s3():
+    global s3
 
+    if s3 is None:
+        s3 = boto3.client('s3', region_name='us-west-2')
+    return s3
+
+
+def download_object(key, output_path, bucket='wb-dlnwp'):
+    if os.path.exists(output_path):
+        print("Already exists", output_path)
+        return
+
+    pathlib.Path(os.path.dirname(output_path)).mkdir(parents=True, exist_ok=True)
+    get_s3().download_file(bucket, key, output_path)
+
+
+def read_metadata(model='WeatherMesh', variant='MA1l'):
+    output_path = f"/fast/realtime/outputs/{model}/meta.{variant}.json"
+    download_object(f"{model}/meta.{variant}.json", output_path)
+    with open(output_path) as f:
+        return json.load(f)
+
+
+def read_by_var(init, forecast_hour, var, model='WeatherMesh', variant='MA1l'):
+    output_path = f"/viz/by_variable/{model}/{init}+{forecast_hour}.{variant}/{var}.npy"
+    download_object(f"by_variable/{model}/{init}+{forecast_hour}.{variant}/{var}.npy", output_path)
+    return np.load(output_path, mmap_mode='r')
+
+
+def read_full_output(init, forecast_hour, model='WeatherMesh', variant='MA1l'):
+    output_path = f"/fast/realtime/outputs/{model}/{init}+{forecast_hour}.{variant}.npy"
+    download_object(f"{model}/{init}+{forecast_hour}.{variant}.npy", output_path)
+    return np.load(output_path, mmap_mode='r')
+###############################################
 
 def tracker_cyclones(cyclone_type="",
 		source="",
@@ -2009,8 +2052,6 @@ def tracker_cyclones(cyclone_type="",
 			hgt_field =get_cumstom_hgt_data(custom_terrain_high_filename, custom_terrain_high_var_name)
 						
 			hgt_field=hgt_field/9.80665
-
-	
 	for index in range(0,len(sourcefiles)):
 	#for index in range(0,8):
 		fdate=dates[index]+hours[index]
@@ -2038,7 +2079,8 @@ def tracker_cyclones(cyclone_type="",
 			sourcelat=varlist[0,:]
 			sourcelon=varlist[1,:]
 			sourcemslp=varlist[2,:]/100
-			dx,dy=compute_dx_dy(lons=sourcelon,lats=sourcelat)
+			if index == 0:
+			  dx,dy=compute_dx_dy(lons=sourcelon,lats=sourcelat)
 		elif source.upper()=="CUSTOM":
 			varu=custom_uwind_variable
 			varv=custom_vwind_variable
@@ -2067,7 +2109,6 @@ def tracker_cyclones(cyclone_type="",
 		if terrain_filter<=0:
 			hgt_field=np.empty_like(sourcemslp)
 			hgt_field[:,:]=-1
-
 		if use_mslp_anomaly:
 			print('-----Collecting Data for MSLP Anomaly-------')
 			avg_mslp=get_mslp_anomaly(idir=idir,
@@ -2091,7 +2132,6 @@ def tracker_cyclones(cyclone_type="",
 		else:
 			mslp_anomaly=np.empty_like(sourcemslp)
 			mslp_anomaly[:]=-9999
-		
 		
 		if cyclone_type.upper() in ("TC","MC","TLC","SC","EC"):
 			clats,clons,couter_r,cpmin,cmws,cclosedp,croci=get_low_centers(lats=sourcelat,
@@ -3916,7 +3956,6 @@ def get_VTU_VTL_B_series(cenlats=np.array([None]),
 		Zvar=np.empty((len(dates), sourceZ.shape[0], sourceZ.shape[1], sourceZ.shape[2]))
 		for idx in range(0, len(dates)):
 			fdate=dates[idx]+hours[idx]
-			print(fdate)
 			sourceZ, sourcelats,sourcelons, source_levels=get_wm_3dvar(idir=idir_upper,
 									erafile=upperfiles[idx],
 									svariable='z',
@@ -4271,6 +4310,7 @@ def paring_centers(cyclone_type="",
 												dir=output_dir,
 												ndates=ndate,
 												nhours=nhour,
+												start_date=begin_year+begin_month+begin_day+begin_hour,
 												)
 										nlats=[]
 										nlons=[]
@@ -4320,6 +4360,7 @@ def paring_centers(cyclone_type="",
 											dir=output_dir,
 											ndates=ndate,
 											nhours=nhour,
+											start_date=begin_year+begin_month+begin_day+begin_hour,
 											)
 								nlats=[]
 								nlons=[]
@@ -4471,6 +4512,7 @@ def paring_centers(cyclone_type="",
 													dir=output_dir,
 													ndates=ndate,
 													nhours=nhour,
+													start_date=begin_year+begin_month+begin_day+begin_hour,
 													)
 											track_end=True
 																		
@@ -4508,6 +4550,7 @@ def paring_centers(cyclone_type="",
 												dir=output_dir,
 												ndates=ndate,
 												nhours=nhour,
+												start_date=begin_year+begin_month+begin_day+begin_hour,
 												)
 									track_end=True
 								else:
@@ -4533,16 +4576,15 @@ def paring_centers(cyclone_type="",
 							
 		time.sleep(0.2)
 		ProgressBar(index+1, len(dates), prefix = '	Progress', suffix = '', decimals = 1, length = 80, fill = '+', printEnd = "\r")
-	fwrite=open(pathoutput+"/"+program_name()+"_"+search_region+"_"+dates[0]+hours[0]+"-"+dates[-1]+hours[-1]+"_"+source+"_"+cyclone_type+".json","w")
-	print(output_dir)
-	json.dump(output_dir,fwrite)
-	fwrite.close()
+	#fwrite=open(pathoutput+"/"+program_name()+"_"+search_region+"_"+dates[0]+hours[0]+"-"+dates[-1]+hours[-1]+"_"+source+"_"+cyclone_type+".json","w")
+	#json.dump(output_dir,fwrite)
+	#fwrite.close()
 	print("")
-	return sys_id
+	return sys_id,output_dir
 
 
 
-def write_tracker(cyclone_type,nlats,nlons,npmin,nmws,nclosedp,nroci,nouter_r,nctype,VTU,VTL, Bhart, search_region,sys_id,dir,ndates, nhours):
+def write_tracker(cyclone_type,nlats,nlons,npmin,nmws,nclosedp,nroci,nouter_r,nctype,VTU,VTL, Bhart, search_region,sys_id,dir,ndates, nhours,start_date):
 	sp="          "
 
 	nnctype=[]	
@@ -4568,12 +4610,19 @@ def write_tracker(cyclone_type,nlats,nlons,npmin,nmws,nclosedp,nroci,nouter_r,nc
 			line=ndates[k]+", "+nhours[k].zfill(2)+","+sp[:-len(str(nlats[k])[0:5])]+ str(nlats[k])[0:5]+","+sp[:-len(str(nlons[k])[0:6])]+ str(nlons[k])[0:6]+","+sp[:-len(str(npmin[k])[0:6])]+ str(npmin[k])[0:7]+","+sp[:-len(str(nmws[k])[0:5])]+ str(nmws[k])[0:5]+","+sp[:-len(str(nouter_r[k])[0:7])]+ str(nouter_r[k])[0:7]+","+sp[:-len(str(nclosedp[k])[0:7])]+ str(nclosedp[k])[0:7]+","+sp[:-len(str(nroci[k])[0:7])]+ str(nroci[k])[0:7]+",   " + str(nnctype[k]) +","+ sp[:-len(str(VTU[k])[0:6])]+ str(VTU[k])[0:6]+","+ sp[:-len(str(VTL[k])[0:6])]+ str(VTL[k])[0:6]+","+ sp[:-len(str(Bhart[k])[0:6])]+ str(Bhart[k])[0:6]+","
 			#fwrite.write(line+"\n")
 	elif cyclone_type.upper() in ("TC","TLC","SC","MC"):
-		print("Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4])
+		valid_date = [];fore_hour = []
+		check_start = datetime(int(start_date[:4]),int(start_date[4:6]),int(start_date[6:8]),int(start_date[8:]))
+		for n in range(0,len(ndates)):
+			str_date = str(ndates[n])
+			vtime = datetime(int(str_date[:4]),int(str_date[4:6]),int(str_date[6:8]),int(nhours[n]))
+			valid_date.append(vtime.isoformat())
+			diff = int((vtime-check_start).total_seconds()/60./60.)
+			fore_hour.append(diff)
 		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]={}
-		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['dates'] = list(ndates)
-		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['hours'] = list(nhours)
-		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['latitude'] = list(nlats)
-		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['longitude'] = list(nlons)
+		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['valid_at'] = list(ndates)
+		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['forecast_hour'] = list(nhours)
+		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['real_lat'] = list(nlats)
+		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['real_lon'] = list(nlons)
 		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['min_press_center'] = list(npmin)
 		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['max_wind_speed'] = list(nmws)
 		dir["Cy"+search_region+str(sys_id).zfill(4)+ndates[0][0:4]]['dist_outer_radus'] = list(nouter_r)
